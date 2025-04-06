@@ -7,6 +7,8 @@ import (
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcapgo"
+	
+	"github.com/upbirb/pcap-anonymizer/internal/anonymizer"
 )
 
 func WritePackets(filename string, packets []gopacket.Packet) error {
@@ -30,52 +32,88 @@ func WritePackets(filename string, packets []gopacket.Packet) error {
 	// Счетчики для отладки
 	total := 0
 	dropped := 0
+	modified := 0
+	originalData := 0
+	serialized := 0
 
 	for i, packet := range packets {
 		total++
+		packetID := int(packet.Metadata().CaptureInfo.Timestamp.UnixNano())
+		
+		log.Printf("[WRITER] Processing packet %d (ID: %d)", i, packetID)
 		
 		// Сохраняем информацию о времени захвата
 		ci := packet.Metadata().CaptureInfo
 		
-		// Используем метод сериализации пакета
-		buf := gopacket.NewSerializeBuffer()
-		opts := gopacket.SerializeOptions{
-			FixLengths:       true,
-			ComputeChecksums: true,
+		// Выбираем данные для записи
+		var packetData []byte
+		var dataSource string
+		
+		// Проверяем наличие модифицированных данных
+		modData := anonymizer.GetModifiedPacketData(packet)
+		
+		if modData != nil {
+			// Используем модифицированные данные
+			packetData = modData
+			dataSource = "modified cache"
+			modified++
+			log.Printf("[WRITER] Packet %d using modified data from cache, size: %d bytes", i, len(packetData))
+		} else {
+			// Используем оригинальные данные
+			packetData = packet.Data()
+			dataSource = "original"
+			originalData++
+			
+			if packetData != nil {
+				log.Printf("[WRITER] Packet %d using original data, size: %d bytes", i, len(packetData))
+			}
 		}
 		
-		// Сериализуем пакет
-		if err := gopacket.SerializePacket(buf, opts, packet); err != nil {
-			log.Printf("Warning: Failed to serialize packet %d, using original data: %v", i, err)
+		if packetData == nil || len(packetData) == 0 {
+			log.Printf("[WRITER] Packet %d has no data, trying to serialize", i)
 			
-			// Если не удалось сериализовать, используем исходные данные
-			packetData := packet.Data()
-			if packetData == nil || len(packetData) == 0 {
-				log.Printf("Error: Packet %d has no data (skipping)", i)
-				dropped++
-				continue
+			// Попробуем получить данные через сериализацию
+			buf := gopacket.NewSerializeBuffer()
+			opts := gopacket.SerializeOptions{
+				FixLengths:       true,
+				ComputeChecksums: true,
 			}
 			
-			ci.Length = len(packetData)
-			ci.CaptureLength = len(packetData)
-			
-			if err := writer.WritePacket(ci, packetData); err != nil {
-				log.Printf("Error writing packet %d: %v", i, err)
-				dropped++
+			err := gopacket.SerializePacket(buf, opts, packet)
+			if err != nil {
+				log.Printf("[WRITER] ERROR: Failed to serialize packet %d: %v", i, err)
+			} else {
+				packetData = buf.Bytes()
+				dataSource = "serialized"
+				serialized++
+				log.Printf("[WRITER] Packet %d successfully serialized, size: %d bytes", i, len(packetData))
 			}
+		}
+		
+		if packetData == nil || len(packetData) == 0 {
+			log.Printf("[WRITER] ERROR: Packet %d has no data, skipping", i)
+			dropped++
+			continue
+		}
+		
+		// Обновляем длину на всякий случай, если пакет был модифицирован
+		ci.Length = len(packetData)
+		ci.CaptureLength = len(packetData)
+		
+		log.Printf("[WRITER] Writing packet %d (%s data), CaptureLength: %d, Length: %d", 
+			i, dataSource, ci.CaptureLength, ci.Length)
+		
+		if err := writer.WritePacket(ci, packetData); err != nil {
+			log.Printf("[WRITER] ERROR: Failed to write packet %d: %v", i, err)
+			dropped++
 		} else {
-			serializedData := buf.Bytes()
-			ci.Length = len(serializedData)
-			ci.CaptureLength = len(serializedData)
-			
-			if err := writer.WritePacket(ci, serializedData); err != nil {
-				log.Printf("Error writing packet %d: %v", i, err)
-				dropped++
-			}
+			log.Printf("[WRITER] Successfully wrote packet %d", i)
 		}
 	}
 	
-	log.Printf("Write summary: Total packets: %d, Dropped: %d", total, dropped)
+	log.Printf("[WRITER] Summary: Total: %d, Modified: %d, Original: %d, Serialized: %d, Dropped: %d", 
+		total, modified, originalData, serialized, dropped)
+	
 	return nil
 }
 

@@ -17,7 +17,7 @@ func main() {
 	verbose := false
 	
 	if len(os.Args) < 3 {
-		fmt.Println("Usage: pcap-anon <input.pcap> <output.pcap> [-v]")
+		fmt.Println("Usage: pcap-anon <input.pcap> <output.pcap> [-v] [--no-sip] [--sip-only]")
 		os.Exit(1)
 	}
 
@@ -40,6 +40,13 @@ func main() {
 			verbose = true
 			cfg.VerboseLogging = true
 			log.Println("Verbose logging enabled")
+		} else if os.Args[i] == "--no-sip" {
+			cfg.ProcessSIP = false
+			log.Println("SIP processing disabled")
+		} else if os.Args[i] == "--sip-only" {
+			cfg.ProcessIP = false
+			cfg.ProcessSIP = true
+			log.Println("Only SIP processing enabled")
 		}
 	}
 
@@ -56,7 +63,7 @@ func main() {
 
 	// Статистика
 	stats := struct {
-		total, modified, ipv4Modified, ipv6Modified int
+		total, modified, ipv4Modified, ipv6Modified, sipModified int
 	}{}
 
 	// Обрабатываем пакеты
@@ -64,16 +71,17 @@ func main() {
 	for i, packet := range packets {
 		stats.total++
 
-		// Показываем прогресс каждые 1000 пакетов
-		if i%1000 == 0 && i > 0 {
+		// Показываем прогресс каждые 100 пакетов
+		if i%100 == 0 && i > 0 {
 			fmt.Printf("\rProcessed %d/%d packets...", i, len(packets))
 		}
 
 		// Получаем IP-адреса до анонимизации
 		beforeSrc, beforeDst := getPacketIPs(packet)
 		
-		// Анонимизируем IP-адреса на сетевом уровне
-		if anonymizer.Process(packet, cfg) {
+		// Анонимизируем IP-адреса и SIP-содержимое
+		modified := anonymizer.Process(packet, cfg)
+		if modified {
 			stats.modified++
 			
 			// Определяем тип модифицированного пакета
@@ -81,6 +89,16 @@ func main() {
 				stats.ipv4Modified++
 			} else if packet.Layer(layers.LayerTypeIPv6) != nil {
 				stats.ipv6Modified++
+			}
+			
+			// Если это SIP-пакет
+			if packet.TransportLayer() != nil && 
+				(packet.TransportLayer().LayerType() == layers.LayerTypeTCP || 
+				 packet.TransportLayer().LayerType() == layers.LayerTypeUDP) {
+				// Предполагаем, что это SIP, если был модифицирован и это TCP/UDP
+				if cfg.ProcessSIP {
+					stats.sipModified++
+				}
 			}
 			
 			// Обновляем контрольные суммы
@@ -106,26 +124,37 @@ func main() {
 
 	// Получаем статистику
 	privateCount, publicCount, ipv6Count := anonymizer.GetIPMappingStats()
+	sipDetected, sipModified, sipPhones, sipIPv4, sipIPv6, sipErrors := anonymizer.GetSIPStatsData()
 	
-	// Получаем примеры анонимизированных IP-адресов
+	// Получаем примеры анонимизированных данных
 	privateMap, publicMap, ipv6Map := anonymizer.GetSampleIPMappings(5)
+	phoneMap := anonymizer.GetSampleSIPPhoneMappings(5)
 
 	// Выводим общую статистику
 	duration := time.Since(startTime)
 	fmt.Printf(`
-Processing results:
-- Total packets:      %d
-- Modified packets:   %d
-- IPv4 modified:      %d
-- IPv6 modified:      %d
-- Processing time:    %s
-
-IP Anonymization:
-- Private IPv4:       %d unique addresses
-- Public IPv4:        %d unique addresses
-- IPv6:               %d unique addresses
-`, stats.total, stats.modified, stats.ipv4Modified, stats.ipv6Modified, 
-   duration, privateCount, publicCount, ipv6Count)
+	Processing results:
+	- Total packets:      %d
+	- Modified packets:   %d
+	- IPv4 modified:      %d
+	- IPv6 modified:      %d
+	- Processing time:    %s
+	
+	IP Anonymization:
+	- Private IPv4:       %d unique addresses
+	- Public IPv4:        %d unique addresses
+	- IPv6:               %d unique addresses
+	
+	SIP Anonymization:
+	- Detected:           %d SIP packets
+	- Modified:           %d SIP packets
+	- Phone numbers:      %d found and anonymized
+	- IPv4 in content:    %d found and anonymized
+	- IPv6 in content:    %d found and anonymized
+	- Serialization errors: %d
+	`, stats.total, stats.modified, stats.ipv4Modified, stats.ipv6Modified, 
+	   duration, privateCount, publicCount, ipv6Count, 
+	   sipDetected, sipModified, sipPhones, sipIPv4, sipIPv6, sipErrors)
 
 	// Выводим примеры анонимизированных IP-адресов
 	fmt.Println("\nExample IPv4 Private mappings:")
@@ -140,6 +169,12 @@ IP Anonymization:
 	
 	fmt.Println("\nExample IPv6 mappings:")
 	for original, anonymized := range ipv6Map {
+		fmt.Printf("  %s -> %s\n", original, anonymized)
+	}
+	
+	// Выводим примеры анонимизированных телефонных номеров
+	fmt.Println("\nExample Phone Number mappings:")
+	for original, anonymized := range phoneMap {
 		fmt.Printf("  %s -> %s\n", original, anonymized)
 	}
 }

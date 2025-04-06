@@ -22,19 +22,38 @@ var (
 // Config содержит настройки для анонимизации
 type Config struct {
 	VerboseLogging bool
+	ProcessIP      bool
+	ProcessSIP     bool
 }
 
 // NewConfig создает новую конфигурацию с значениями по умолчанию
 func NewConfig() *Config {
 	return &Config{
 		VerboseLogging: false,
+		ProcessIP:      true,
+		ProcessSIP:     true,
 	}
 }
 
-// Process обрабатывает пакет и анонимизирует IP-адреса
+// Process обрабатывает пакет и анонимизирует IP-адреса и SIP-данные
 func Process(packet gopacket.Packet, cfg *Config) bool {
+	modified := false
+	
 	// Анонимизируем IP-адреса на сетевом уровне
-	return ProcessNetworkLayer(packet)
+	if cfg.ProcessIP {
+		if ProcessNetworkLayer(packet) {
+			modified = true
+		}
+	}
+	
+	// Анонимизируем SIP-данные
+	if cfg.ProcessSIP {
+		if ProcessSIPPacket(packet) {
+			modified = true
+		}
+	}
+	
+	return modified
 }
 
 // ProcessNetworkLayer анонимизирует IP-адреса на сетевом уровне
@@ -262,6 +281,12 @@ func GetIPMappingStats() (privateIPv4, publicIPv4, ipv6 int) {
 	
 	return len(ipv4PrivateMap), len(ipv4PublicMap), len(ipv6Map)
 }
+
+// GetSIPStats возвращает статистику по обработке SIP-пакетов
+func GetSIPStats() (detected, modified, phones, ipv4, ipv6, errors int) {
+	return GetSIPStatsData()
+}
+
 
 // GetSampleIPMappings возвращает примеры анонимизированных IP-адресов
 func GetSampleIPMappings(count int) (privateMap, publicMap, ipv6Maps map[string]string) {

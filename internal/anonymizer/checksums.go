@@ -7,7 +7,7 @@ import (
 	"github.com/google/gopacket/layers"
 )
 
-// UpdateChecksums обновляет контрольные суммы в пакете
+// UpdateChecksums обновляет контрольные суммы пакета после изменений IP-адресов
 func UpdateChecksums(packet gopacket.Packet) {
 	networkLayer := packet.NetworkLayer()
 	if networkLayer == nil {
