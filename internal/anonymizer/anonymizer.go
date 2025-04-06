@@ -282,12 +282,6 @@ func GetIPMappingStats() (privateIPv4, publicIPv4, ipv6 int) {
 	return len(ipv4PrivateMap), len(ipv4PublicMap), len(ipv6Map)
 }
 
-// GetSIPStats возвращает статистику по обработке SIP-пакетов
-func GetSIPStats() (detected, modified, phones, ipv4, ipv6, errors int) {
-	return GetSIPStatsData()
-}
-
-
 // GetSampleIPMappings возвращает примеры анонимизированных IP-адресов
 func GetSampleIPMappings(count int) (privateMap, publicMap, ipv6Maps map[string]string) {
 	mapMutex.RLock()
