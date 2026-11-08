@@ -137,6 +137,13 @@ func AnonymizeIPv4(ip net.IP) bool {
 
 // anonymizeIPv4 анонимизирует IPv4-адрес (внутренняя реализация)
 func anonymizeIPv4(ip net.IP) bool {
+	// net.ParseIP возвращает 16 байт даже для IPv4. Изменяем последние
+	// четыре байта через To4, сохраняя корректное IPv4-mapped представление.
+	ip = ip.To4()
+	if ip == nil {
+		return false
+	}
+
 	// Если адрес уже является документационным, оставляем его как есть
 	if IsDocumentationIPv4(ip) {
 		return false

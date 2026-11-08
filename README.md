@@ -35,7 +35,7 @@ git clone https://github.com/upbirb/pcap-anonymizer.git
 cd pcap-anonymizer
 
 # Build the project
-go build -o pcap-anon ./cmd/main.go
+go build -o pcap-anon ./cmd
 ```
 
 ## Usage
@@ -70,21 +70,59 @@ go build -o pcap-anon ./cmd/main.go
 ./pcap-anon sip-traffic.pcap sip-only.pcap --sip-only
 ```
 
+Flags can appear before or after file paths. Use `--help` to display usage, or
+`--` before paths that start with `-`. Unknown flags and the conflicting
+`--no-sip --sip-only` combination return an error.
+
 ## Project Structure
 
-```
+```text
 pcap-anonymizer/
-|-------cmd/
-|      └── main.go                 # Entry point
+├── cmd/
+│   └── main.go                    # CLI entry point and exit status
 ├── internal/
+│   ├── cli/
+│   │   ├── options.go             # Argument parsing and configuration
+│   │   ├── process.go             # Packet processing and counters
+│   │   ├── report.go              # Statistics report formatting
+│   │   ├── run.go                 # CLI workflow exposed as cli.Run
+│   │   └── run_test.go            # CLI processing modes, arguments and errors
 │   ├── anonymizer/
-│   │   ├── anonymizer.go          # IP anonymization logic
-│   │   ├── checksums.go           # Checksum updates
-│   │   └── sip.go                 # SIP content anonymization
+│   │   ├── anonymizer.go          # Shared IP mappings and network-layer anonymization
+│   │   ├── anonymizer_test.go     # IP representation and SIP mapping regression tests
+│   │   ├── checksums.go           # Protocol checksum updates
+│   │   ├── checksums_test.go      # Checksums and lengths of anonymized packets
+│   │   ├── sip.go                 # SIP packet processing, phone numbers and user IDs
+│   │   ├── sip_test.go            # SIP detection, identifiers, statistics and configuration
+│   │   ├── sip_addresses.go       # Field-based SIP/SDP address parsing and replacement
+│   │   └── sip_addresses_test.go  # SIP/SDP address field and mapping tests
 │   └── pcap/
-│         ├── reader.go            # PCAP file reading
-│        └── writer.go             # PCAP file writing
-└── go.mod                         # Dependencies
+│       ├── pcap_test.go           # Capture formats, round trips and error handling
+│       ├── reader.go              # PCAP/PCAPNG reading with GZIP input support
+│       └── writer.go              # PCAP output
+├── go.mod                        # Module definition and dependency versions
+├── go.sum                        # Dependency checksums
+├── LICENSE                       # MIT license
+└── README.md                     # Project documentation
+```
+
+## Tests
+
+Tests live alongside the implementation in `internal/cli`, `internal/anonymizer` and
+`internal/pcap`, in `*_test.go` files. They cover CLI modes and errors, IP/SIP
+anonymization, checksums, capture formats and read/write round trips. Capture
+fixtures are generated in temporary directories; no real traffic files are required.
+
+```bash
+# Run all tests
+go test ./...
+
+# Run only anonymizer tests
+go test ./internal/anonymizer
+
+# Check for races, shuffle test order and collect statement coverage
+go test -race -shuffle=on -coverprofile=coverage.out ./...
+go tool cover -func=coverage.out
 ```
 
 ## How It Works
@@ -147,8 +185,19 @@ The tool anonymizes the following elements in SIP (Session Initiation Protocol) 
 
 - Telephone numbers in SIP URIs (e.g., `sip:+79261234567@domain.com`)
 - Telephone numbers in display names and headers
-- IPv4 addresses in SIP message content
-- IPv6 addresses in SIP message content, including those in Request-URI
+- IPv4/IPv6 hosts in `sip:` and `sips:` URIs, including Request-URI and routing headers
+- Via sent-by hosts and `received`/`maddr` parameters, including compact `v` headers
+- Call-ID host suffixes, including compact `i` headers
+- Address lists in `X-Forwarded-For` and `X-Real-IP`
+- SDP origin (`o=`), connection (`c=`), RTCP and ICE candidate addresses
+
+Address boundaries come from the field syntax; Go's `net/netip` parser validates
+the complete literal. SIP/SDP uses the same address mapping functions as packet
+headers. Ports, brackets and SDP multicast suffixes are preserved.
+Unknown headers are inspected only for explicit SIP URIs; arbitrary text containing
+an IP-like string is not rewritten. Add an explicit field rule for extensions that
+carry addresses. Folded headers and SIP messages split across TCP segments are not
+fully supported by this parser.
 
 The anonymization preserves the format of the original data:
 - Phone numbers keep their original length and +/- prefix
