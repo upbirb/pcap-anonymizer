@@ -9,11 +9,12 @@ import (
 	"github.com/upbirb/pcap-anonymizer/internal/anonymizer"
 )
 
-const usage = "Usage: pcap-anon <input.pcap> <output.pcap> [-v] [--no-sip] [--sip-only]"
+const usage = "Usage: pcap-anon <input.pcap> <output.pcap> [-v] [--no-sip] [--sip-only] [--show-mappings]"
 
 type options struct {
 	input, output string
 	config        anonymizer.Config
+	showMappings  bool
 }
 
 func parseOptions(args []string) (options, error) {
@@ -22,6 +23,7 @@ func parseOptions(args []string) (options, error) {
 	flags := flag.NewFlagSet("pcap-anon", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	flags.BoolVar(&opts.config.VerboseLogging, "v", false, "enable verbose logging")
+	flags.BoolVar(&opts.showMappings, "show-mappings", false, "include original identities and their replacements in the report")
 	flags.BoolVar(&noSIP, "no-sip", false, "disable SIP anonymization")
 	flags.BoolVar(&sipOnly, "sip-only", false, "only anonymize SIP content")
 

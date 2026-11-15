@@ -19,6 +19,11 @@ import (
 
 func cliFixture(t *testing.T, path string) {
 	t.Helper()
+	cliFixtureWithPayload(t, path, []byte("OPTIONS sip:alice@10.11.12.13 SIP/2.0\r\nContent-Length: 0\r\n\r\n"))
+}
+
+func cliFixtureWithPayload(t *testing.T, path string, payload []byte) {
+	t.Helper()
 	f, e := os.Create(path)
 	if e != nil {
 		t.Fatal(e)
@@ -47,7 +52,7 @@ func cliFixture(t *testing.T, path string) {
 			t.Fatal(e)
 		}
 		b := gopacket.NewSerializeBuffer()
-		if e := gopacket.SerializeLayers(b, gopacket.SerializeOptions{FixLengths: true, ComputeChecksums: true}, eth, ip, udp, gopacket.Payload([]byte("OPTIONS sip:alice@10.11.12.13 SIP/2.0\r\nContent-Length: 0\r\n\r\n"))); e != nil {
+		if e := gopacket.SerializeLayers(b, gopacket.SerializeOptions{FixLengths: true, ComputeChecksums: true}, eth, ip, udp, gopacket.Payload(payload)); e != nil {
 			t.Fatal(e)
 		}
 		data := b.Bytes()
@@ -198,7 +203,7 @@ func TestOutputErrors(t *testing.T) {
 	if _, err := os.Stat(output); !os.IsNotExist(err) {
 		t.Fatal("capture written after progress failure")
 	}
-	if err := writeReport(failingWriter{}, processingStats{}, time.Second); !errors.Is(err, io.ErrClosedPipe) {
+	if err := writeReport(failingWriter{}, processingStats{}, time.Second, false); !errors.Is(err, io.ErrClosedPipe) {
 		t.Fatalf("report error lost: %v", err)
 	}
 	if err := Run([]string{"--help"}, failingWriter{}, io.Discard); !errors.Is(err, io.ErrClosedPipe) {
@@ -212,4 +217,17 @@ func TestGetPacketIPsWithoutNetworkLayer(t *testing.T) {
 	if a != "" || b != "" {
 		t.Fatal("non-IP packet has addresses")
 	}
+}
+
+// getPacketIPs возвращает исходный и целевой IP-адреса пакета
+func getPacketIPs(packet gopacket.Packet) (string, string) {
+	if net := packet.NetworkLayer(); net != nil {
+		switch v := net.(type) {
+		case *layers.IPv4:
+			return v.SrcIP.String(), v.DstIP.String()
+		case *layers.IPv6:
+			return v.SrcIP.String(), v.DstIP.String()
+		}
+	}
+	return "", ""
 }

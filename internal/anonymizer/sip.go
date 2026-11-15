@@ -3,7 +3,6 @@ package anonymizer
 import (
 	"bytes"
 	"fmt"
-	"log"
 	"regexp"
 	"strings"
 
@@ -39,20 +38,18 @@ var (
 
 // ProcessSIPPacket анонимизирует телефонные номера и IP-адреса в SIP-пакете
 func ProcessSIPPacket(packet gopacket.Packet) bool {
-	// Получаем уникальный идентификатор пакета
-	packetID := int(packet.Metadata().CaptureInfo.Timestamp.UnixNano())
+	return processSIPPacket(packet, nil)
+}
 
-	log.Printf("[SIP] Processing packet ID: %d", packetID)
-
+func processSIPPacket(packet gopacket.Packet, cfg *Config) bool {
 	// Проверяем наличие транспортного слоя
 	transportLayer := packet.TransportLayer()
 	if transportLayer == nil {
-		log.Printf("[SIP] Packet %d has no transport layer", packetID)
+		cfg.debugf("SIP: skipped (no transport layer)")
 		return false
 	}
 
 	var payload []byte
-	var protocol string
 	var transportLayerOffset int
 	var isUDP bool
 
@@ -61,51 +58,40 @@ func ProcessSIPPacket(packet gopacket.Packet) bool {
 	case layers.LayerTypeTCP:
 		tcp, _ := transportLayer.(*layers.TCP)
 		payload = tcp.Payload
-		protocol = "TCP"
 		// Определяем смещение до payload
 		transportLayerOffset = len(packet.Data()) - len(payload)
-		log.Printf("[SIP] Packet %d is TCP with payload size: %d bytes, offset: %d",
-			packetID, len(payload), transportLayerOffset)
 
 	case layers.LayerTypeUDP:
 		udp, _ := transportLayer.(*layers.UDP)
 		payload = udp.Payload
-		protocol = "UDP"
 		isUDP = true
 		// Определяем смещение до payload
 		transportLayerOffset = len(packet.Data()) - len(payload)
-		log.Printf("[SIP] Packet %d is UDP with payload size: %d bytes, offset: %d",
-			packetID, len(payload), transportLayerOffset)
 
 	default:
-		log.Printf("[SIP] Packet %d has unsupported transport layer type: %s", packetID, transportLayer.LayerType())
+		cfg.debugf("SIP: skipped (unsupported transport)")
 		return false
 	}
 
 	// Проверяем, является ли это SIP-пакетом
 	if len(payload) == 0 {
-		log.Printf("[SIP] Packet %d has empty payload", packetID)
+		cfg.debugf("SIP: skipped (empty payload)")
 		return false
 	}
 
 	if !isSIPPacket(payload) {
-		log.Printf("[SIP] Packet %d is not a SIP packet", packetID)
+		cfg.debugf("SIP: skipped (payload not recognized as SIP)")
 		return false
 	}
 
 	// Увеличиваем счетчик обнаруженных SIP-пакетов
 	sipPacketsDetected++
-	log.Printf("[SIP] Packet %d is a SIP packet over %s", packetID, protocol)
-
-	// Выводим первые 100 байт SIP сообщения для отладки
-	previewSize := 100
-	if len(payload) < previewSize {
-		previewSize = len(payload)
-	}
-	log.Printf("[SIP] Packet %d SIP preview: %s", packetID, string(payload[:previewSize]))
+	cfg.debugf("SIP: detected protocol=%s payload_bytes=%d", transportLayer.LayerType(), len(payload))
 
 	// Анонимизируем SIP-содержимое
 	newSipPayload, phoneCount, ipv4Count, ipv6Count := anonymizeSIPContent(payload)
+	cfg.debugf("SIP: replacements phones=%d ipv4=%d ipv6=%d; payload_bytes=%d -> %d",
+		phoneCount, ipv4Count, ipv6Count, len(payload), len(newSipPayload))
 
 	// Обновляем счетчики найденных элементов
 	phoneNumbersFound += phoneCount
@@ -114,12 +100,9 @@ func ProcessSIPPacket(packet gopacket.Packet) bool {
 
 	// Если содержимое не изменилось, выходим
 	if bytes.Equal(payload, newSipPayload) {
-		log.Printf("[SIP] Packet %d content was not modified", packetID)
+		cfg.debugf("SIP: content unchanged")
 		return false
 	}
-
-	log.Printf("[SIP] Packet %d content was modified (found: %d phones, %d IPv4, %d IPv6)",
-		packetID, phoneCount, ipv4Count, ipv6Count)
 
 	// Увеличиваем счетчик модифицированных SIP-пакетов
 	sipPacketsModified++
@@ -143,7 +126,6 @@ func ProcessSIPPacket(packet gopacket.Packet) bool {
 			newLength := uint16(8 + len(newSipPayload))
 			newData[udpHeaderOffset+4] = byte(newLength >> 8)   // Старший байт
 			newData[udpHeaderOffset+5] = byte(newLength & 0xFF) // Младший байт
-			log.Printf("[SIP] Packet %d updated UDP length field to %d", packetID, newLength)
 		}
 	}
 
@@ -151,23 +133,16 @@ func ProcessSIPPacket(packet gopacket.Packet) bool {
 	mapMutex.Lock()
 	modifiedPacketData[packet] = newData
 	mapMutex.Unlock()
-
-	log.Printf("[SIP] Packet %d stored modified data, size: %d bytes", packetID, len(newData))
+	cfg.debugf("SIP: replacement stored packet_bytes=%d", len(newData))
 
 	return true
 }
 
 // GetModifiedPacketData возвращает модифицированные данные пакета
 func GetModifiedPacketData(packet gopacket.Packet) []byte {
-	packetID := int(packet.Metadata().CaptureInfo.Timestamp.UnixNano())
-
 	mapMutex.RLock()
 	data := modifiedPacketData[packet]
 	mapMutex.RUnlock()
-
-	if data != nil {
-		log.Printf("[SIP] Found modified data for packet %d, size: %d bytes", packetID, len(data))
-	}
 
 	return data
 }
@@ -207,7 +182,6 @@ func isSIPPacket(payload []byte) bool {
 // Возвращает модифицированный контент и счетчики найденных элементов
 func anonymizeSIPContent(payload []byte) ([]byte, int, int, int) {
 	content := string(payload)
-	original := content
 
 	// Счетчики для найденных элементов
 	phoneCount := 0
@@ -227,7 +201,6 @@ func anonymizeSIPContent(payload []byte) ([]byte, int, int, int) {
 			// URI обрабатывается следующим проходом; здесь меняем только имя.
 			anonDisplayName := getAnonymizedPhoneNumber(displayName)
 
-			log.Printf("[SIP] Anonymizing display name: %s -> %s", displayName, anonDisplayName)
 			phoneCount++
 
 			return quote1 + anonDisplayName + quote2AndBracket + phoneNumber + atSign
@@ -246,7 +219,6 @@ func anonymizeSIPContent(payload []byte) ([]byte, int, int, int) {
 			// Анонимизируем телефонный номер
 			anonPhone := getAnonymizedPhoneNumber(phoneNumber)
 
-			log.Printf("[SIP] Anonymizing phone number in URI: %s -> %s", phoneNumber, anonPhone)
 			phoneCount++
 
 			return prefix + anonPhone + domain
@@ -266,8 +238,6 @@ func anonymizeSIPContent(payload []byte) ([]byte, int, int, int) {
 		if len(submatches) >= 3 {
 			headerName := submatches[1]
 			headerValue := submatches[2]
-
-			log.Printf("[SIP] Processing X-header: %s %s", headerName, headerValue)
 
 			// Анонимизируем телефонные номера в значении заголовка
 			headerValue = anonymizePhoneNumbers(headerValue, &phoneCount)
@@ -289,11 +259,6 @@ func anonymizeSIPContent(payload []byte) ([]byte, int, int, int) {
 			}
 		}
 		content = strings.Join(lines, "\r\n") + "\r\n\r\n" + body
-	}
-
-	// Проверяем, было ли изменено содержимое
-	if content != original {
-		log.Printf("[SIP] Content changed: %d bytes -> %d bytes", len(original), len(content))
 	}
 
 	return []byte(content), phoneCount, ipv4Count, ipv6Count
@@ -418,7 +383,6 @@ func anonymizePhoneNumbers(text string, count *int) string {
 
 		// Анонимизируем телефонный номер
 		anonPhone := getAnonymizedPhoneNumber(match)
-		log.Printf("[SIP] Anonymizing phone number in X-header: %s -> %s", match, anonPhone)
 		*count++
 
 		return anonPhone
@@ -467,7 +431,6 @@ func anonymizeUserIDs(text string) string {
 			nextUserID++
 
 			userIDMap[match] = anonID
-			log.Printf("[SIP] Anonymizing user ID in X-header: %s -> %s", match, anonID)
 
 			return anonID
 		})

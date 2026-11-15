@@ -11,7 +11,8 @@ PCAP Anonymizer is a command-line tool for anonymizing IPv4/IPv6 addresses and s
 - Consistent address replacement (the same address is always replaced with the same anonymized address)
 - Automatic checksum updates for IP, TCP, UDP, and ICMP headers
 - Detailed anonymization statistics
-- Verbose mode for debugging
+- Verbose packet diagnostics without original identities
+- Optional mapping report with `--show-mappings`
 
 ## Anonymization Rules
 
@@ -44,8 +45,11 @@ go build -o pcap-anon ./cmd
 # Basic usage
 ./pcap-anon <input.pcap> <output.pcap>
 
-# With verbose output enabled
+# With verbose packet diagnostics enabled
 ./pcap-anon <input.pcap> <output.pcap> -v
+
+# Explicitly include original identities and their replacements in the report
+./pcap-anon <input.pcap> <output.pcap> --show-mappings
 
 # Disable SIP anonymization
 ./pcap-anon <input.pcap> <output.pcap> --no-sip
@@ -70,6 +74,13 @@ go build -o pcap-anon ./cmd
 ./pcap-anon sip-traffic.pcap sip-only.pcap --sip-only
 ```
 
+By default, output contains aggregate statistics and operational messages.
+With `-v`, diagnostics additionally show transport type, payload sizes, replacement
+counts and reasons for skipping SIP processing. Packet contents, original IP
+addresses, phone numbers and user identifiers are not logged, including with `-v`. The `--show-mappings` flag explicitly includes
+original identities and their replacements in the report on standard output;
+use it only when that output is intended to contain sensitive data.
+
 Flags can appear before or after file paths. Use `--help` to display usage, or
 `--` before paths that start with `-`. Unknown flags and the conflicting
 `--no-sip --sip-only` combination return an error.
@@ -83,6 +94,7 @@ pcap-anonymizer/
 ├── internal/
 │   ├── cli/
 │   │   ├── options.go             # Argument parsing and configuration
+│   │   ├── privacy_test.go        # Default output and explicit mapping disclosure
 │   │   ├── process.go             # Packet processing and counters
 │   │   ├── report.go              # Statistics report formatting
 │   │   ├── run.go                 # CLI workflow exposed as cli.Run
@@ -158,6 +170,11 @@ SIP Anonymization:
 - IPv6 in content:    42 found and anonymized
 - Serialization errors: 0
 
+```
+
+With `--show-mappings`, the report also includes original identities and their replacements:
+
+```text
 Example IPv4 Private mappings:
   192.168.1.1 -> 192.0.2.1
   10.0.0.1 -> 192.0.2.2

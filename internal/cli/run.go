@@ -23,6 +23,7 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	logger := log.New(stderr, "", log.LstdFlags)
+	opts.config.Logger = logger
 	started := time.Now()
 	logger.Printf("Reading packets from %s...", opts.input)
 	packets, err := pcap.ReadPackets(opts.input)
@@ -39,7 +40,7 @@ func Run(args []string, stdout, stderr io.Writer) error {
 	if err := pcap.WritePackets(opts.output, packets); err != nil {
 		return fmt.Errorf("write output %q: %w", opts.output, err)
 	}
-	if err := writeReport(stdout, stats, time.Since(started)); err != nil {
+	if err := writeReport(stdout, stats, time.Since(started), opts.showMappings); err != nil {
 		return fmt.Errorf("write report: %w", err)
 	}
 	return nil

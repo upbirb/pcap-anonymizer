@@ -23,8 +23,8 @@ func processPackets(packets []gopacket.Packet, cfg *anonymizer.Config, out io.Wr
 				return stats, err
 			}
 		}
-		beforeSrc, beforeDst := getPacketIPs(packet)
-		if anonymizer.Process(packet, cfg) {
+		modified := anonymizer.Process(packet, cfg)
+		if modified {
 			stats.modified++
 			if packet.Layer(layers.LayerTypeIPv4) != nil {
 				stats.ipv4Modified++
@@ -34,23 +34,9 @@ func processPackets(packets []gopacket.Packet, cfg *anonymizer.Config, out io.Wr
 			anonymizer.UpdateChecksums(packet)
 		}
 		if cfg.VerboseLogging {
-			afterSrc, afterDst := getPacketIPs(packet)
-			logger.Printf("Packet %d: %s → %s => %s → %s", i, beforeSrc, beforeDst, afterSrc, afterDst)
+			logger.Printf("Packet %d: modified=%t", i, modified)
 		}
 	}
 	_, err := fmt.Fprintln(out)
 	return stats, err
-}
-
-// getPacketIPs возвращает исходный и целевой IP-адреса пакета
-func getPacketIPs(packet gopacket.Packet) (string, string) {
-	if net := packet.NetworkLayer(); net != nil {
-		switch v := net.(type) {
-		case *layers.IPv4:
-			return v.SrcIP.String(), v.DstIP.String()
-		case *layers.IPv6:
-			return v.SrcIP.String(), v.DstIP.String()
-		}
-	}
-	return "", ""
 }

@@ -9,16 +9,11 @@ import (
 	"github.com/upbirb/pcap-anonymizer/internal/anonymizer"
 )
 
-func writeReport(out io.Writer, stats processingStats, duration time.Duration) error {
+func writeReport(out io.Writer, stats processingStats, duration time.Duration, showMappings bool) error {
 	var text strings.Builder
 	// Получаем статистику
 	privateCount, publicCount, ipv6Count := anonymizer.GetIPMappingStats()
 	sipDetected, sipModified, sipPhones, sipIPv4, sipIPv6, sipErrors, userIDs := anonymizer.GetSIPStatsData()
-
-	// Получаем примеры анонимизированных данных
-	privateMap, publicMap, ipv6Map := anonymizer.GetSampleIPMappings(5)
-	phoneMap := anonymizer.GetSampleSIPPhoneMappings(5)
-	userIDMap := anonymizer.GetSampleUserIDMappings(5)
 
 	// Выводим общую статистику
 
@@ -47,32 +42,39 @@ func writeReport(out io.Writer, stats processingStats, duration time.Duration) e
 		duration, privateCount, publicCount, ipv6Count,
 		sipDetected, sipModified, sipPhones, sipIPv4, sipIPv6, userIDs, sipErrors)
 
-	// Выводим примеры анонимизированных IP-адресов
-	fmt.Fprintln(&text, "\nExample IPv4 Private mappings:")
-	for original, anonymized := range privateMap {
-		fmt.Fprintf(&text, "  %s -> %s\n", original, anonymized)
-	}
+	if showMappings {
+		// Получаем примеры анонимизированных данных
+		privateMap, publicMap, ipv6Map := anonymizer.GetSampleIPMappings(5)
+		phoneMap := anonymizer.GetSampleSIPPhoneMappings(5)
+		userIDMap := anonymizer.GetSampleUserIDMappings(5)
 
-	fmt.Fprintln(&text, "\nExample IPv4 Public mappings:")
-	for original, anonymized := range publicMap {
-		fmt.Fprintf(&text, "  %s -> %s\n", original, anonymized)
-	}
+		// Выводим примеры анонимизированных IP-адресов
+		fmt.Fprintln(&text, "\nExample IPv4 Private mappings:")
+		for original, anonymized := range privateMap {
+			fmt.Fprintf(&text, "  %s -> %s\n", original, anonymized)
+		}
 
-	fmt.Fprintln(&text, "\nExample IPv6 mappings:")
-	for original, anonymized := range ipv6Map {
-		fmt.Fprintf(&text, "  %s -> %s\n", original, anonymized)
-	}
+		fmt.Fprintln(&text, "\nExample IPv4 Public mappings:")
+		for original, anonymized := range publicMap {
+			fmt.Fprintf(&text, "  %s -> %s\n", original, anonymized)
+		}
 
-	// Выводим примеры анонимизированных телефонных номеров
-	fmt.Fprintln(&text, "\nExample Phone Number mappings:")
-	for original, anonymized := range phoneMap {
-		fmt.Fprintf(&text, "  %s -> %s\n", original, anonymized)
-	}
+		fmt.Fprintln(&text, "\nExample IPv6 mappings:")
+		for original, anonymized := range ipv6Map {
+			fmt.Fprintf(&text, "  %s -> %s\n", original, anonymized)
+		}
 
-	// Выводим примеры анонимизированных идентификаторов пользователей
-	fmt.Fprintln(&text, "\nExample User ID mappings:")
-	for original, anonymized := range userIDMap {
-		fmt.Fprintf(&text, "  %s -> %s\n", original, anonymized)
+		// Выводим примеры анонимизированных телефонных номеров
+		fmt.Fprintln(&text, "\nExample Phone Number mappings:")
+		for original, anonymized := range phoneMap {
+			fmt.Fprintf(&text, "  %s -> %s\n", original, anonymized)
+		}
+
+		// Выводим примеры анонимизированных идентификаторов пользователей
+		fmt.Fprintln(&text, "\nExample User ID mappings:")
+		for original, anonymized := range userIDMap {
+			fmt.Fprintf(&text, "  %s -> %s\n", original, anonymized)
+		}
 	}
 
 	_, err := io.WriteString(out, text.String())

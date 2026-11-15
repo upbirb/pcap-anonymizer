@@ -1,6 +1,7 @@
 package anonymizer
 
 import (
+	"log"
 	"net"
 	"sync"
 
@@ -24,6 +25,15 @@ type Config struct {
 	VerboseLogging bool
 	ProcessIP      bool
 	ProcessSIP     bool
+	// Logger receives identity-free diagnostics when VerboseLogging is enabled.
+	// A nil logger disables library diagnostics.
+	Logger *log.Logger
+}
+
+func (cfg *Config) debugf(format string, args ...any) {
+	if cfg != nil && cfg.VerboseLogging && cfg.Logger != nil {
+		cfg.Logger.Printf(format, args...)
+	}
 }
 
 // NewConfig создает новую конфигурацию с значениями по умолчанию
@@ -38,61 +48,63 @@ func NewConfig() *Config {
 // Process обрабатывает пакет и анонимизирует IP-адреса и SIP-данные
 func Process(packet gopacket.Packet, cfg *Config) bool {
 	modified := false
-	
+
 	// Анонимизируем IP-адреса на сетевом уровне
 	if cfg.ProcessIP {
-		if ProcessNetworkLayer(packet) {
+		ipModified := ProcessNetworkLayer(packet)
+		cfg.debugf("IP: modified=%t", ipModified)
+		if ipModified {
 			modified = true
 		}
 	}
-	
+
 	// Анонимизируем SIP-данные
 	if cfg.ProcessSIP {
-		if ProcessSIPPacket(packet) {
+		if processSIPPacket(packet, cfg) {
 			modified = true
 		}
 	}
-	
+
 	return modified
 }
 
 // ProcessNetworkLayer анонимизирует IP-адреса на сетевом уровне
 func ProcessNetworkLayer(packet gopacket.Packet) bool {
 	modified := false
-	
+
 	// Обработка IPv4
 	if ipv4Layer := packet.Layer(layers.LayerTypeIPv4); ipv4Layer != nil {
 		ipv4, _ := ipv4Layer.(*layers.IPv4)
-		
+
 		// Анонимизируем исходный IP-адрес
 		srcModified := anonymizeIPv4(ipv4.SrcIP)
-		
+
 		// Анонимизируем IP-адрес назначения
 		dstModified := anonymizeIPv4(ipv4.DstIP)
-		
+
 		if srcModified || dstModified {
 			modified = true
-			
+
 			// Обновляем контрольную сумму
 			ipv4.Checksum = 0 // Сбрасываем, чтобы пересчитать
 		}
 	}
-	
+
 	// Обработка IPv6
 	if ipv6Layer := packet.Layer(layers.LayerTypeIPv6); ipv6Layer != nil {
 		ipv6, _ := ipv6Layer.(*layers.IPv6)
-		
+
 		// Анонимизируем исходный IP-адрес
 		srcModified := anonymizeIPv6(ipv6.SrcIP)
-		
+
 		// Анонимизируем IP-адрес назначения
 		dstModified := anonymizeIPv6(ipv6.DstIP)
-		
+
 		if srcModified || dstModified {
 			modified = true
 		}
 	}
-	
+
 	return modified
 }
 
@@ -106,7 +118,7 @@ func IsPrivateIPv4(ip net.IP) bool {
 		"169.254.0.0/16", // Link-local
 		"0.0.0.0/8",      // Текущая сеть
 	}
-	
+
 	for _, block := range privateBlocks {
 		_, ipnet, _ := net.ParseCIDR(block)
 		if ipnet.Contains(ip) {
@@ -148,9 +160,9 @@ func anonymizeIPv4(ip net.IP) bool {
 	if IsDocumentationIPv4(ip) {
 		return false
 	}
-	
+
 	ipString := ip.String()
-	
+
 	// Проверяем, был ли IP уже анонимизирован
 	mapMutex.RLock()
 	if IsPrivateIPv4(ip) {
@@ -169,11 +181,11 @@ func anonymizeIPv4(ip net.IP) bool {
 		}
 	}
 	mapMutex.RUnlock()
-	
+
 	// Создаем новый анонимизированный IP
 	mapMutex.Lock()
 	defer mapMutex.Unlock()
-	
+
 	// Повторная проверка после блокировки
 	if IsPrivateIPv4(ip) {
 		if anonIP, ok := ipv4PrivateMap[ipString]; ok {
@@ -181,18 +193,18 @@ func anonymizeIPv4(ip net.IP) bool {
 			copy(ip, anonIP.To4())
 			return true
 		}
-		
+
 		// Создаем новый анонимизированный IP
 		if nextPrivateID >= 254 {
 			nextPrivateID = 1 // Перезапускаем с начала
 		}
-		
+
 		newIP := net.IPv4(192, 0, 2, nextPrivateID).To4()
 		nextPrivateID++
-		
+
 		// Сохраняем анонимизированный IP
 		ipv4PrivateMap[ipString] = newIP
-		
+
 		// Копируем анонимизированный IP в оригинальный
 		copy(ip, newIP)
 		return true
@@ -202,18 +214,18 @@ func anonymizeIPv4(ip net.IP) bool {
 			copy(ip, anonIP.To4())
 			return true
 		}
-		
+
 		// Создаем новый анонимизированный IP
 		if nextPublicID >= 254 {
 			nextPublicID = 1 // Перезапускаем с начала
 		}
-		
+
 		newIP := net.IPv4(203, 0, 113, nextPublicID).To4()
 		nextPublicID++
-		
+
 		// Сохраняем анонимизированный IP
 		ipv4PublicMap[ipString] = newIP
-		
+
 		// Копируем анонимизированный IP в оригинальный
 		copy(ip, newIP)
 		return true
@@ -231,9 +243,9 @@ func anonymizeIPv6(ip net.IP) bool {
 	if IsDocumentationIPv6(ip) {
 		return false
 	}
-	
+
 	ipString := ip.String()
-	
+
 	// Проверяем, был ли IP уже анонимизирован
 	mapMutex.RLock()
 	if anonIP, ok := ipv6Map[ipString]; ok {
@@ -243,41 +255,41 @@ func anonymizeIPv6(ip net.IP) bool {
 		return true
 	}
 	mapMutex.RUnlock()
-	
+
 	// Создаем новый анонимизированный IP
 	mapMutex.Lock()
 	defer mapMutex.Unlock()
-	
+
 	// Повторная проверка после блокировки
 	if anonIP, ok := ipv6Map[ipString]; ok {
 		// Копируем анонимизированный IP в оригинальный
 		copy(ip, anonIP)
 		return true
 	}
-	
+
 	// Создаем новый анонимизированный IP из диапазона 2001:db8::/32
 	if nextIPv6Suffix >= 0xFFFFFFFFFFFFFFFF {
 		nextIPv6Suffix = 1 // Перезапускаем с начала
 	}
-	
+
 	newIP := make(net.IP, 16)
 	copy(newIP, net.ParseIP("2001:db8::"))
-	
+
 	// Заполняем последние 8 байт суффиксом
 	suffix := nextIPv6Suffix
 	for i := 15; i >= 8; i-- {
 		newIP[i] = byte(suffix & 0xFF)
 		suffix >>= 8
 	}
-	
+
 	nextIPv6Suffix++
-	
+
 	// Сохраняем анонимизированный IP
 	ipv6Map[ipString] = newIP
-	
+
 	// Копируем анонимизированный IP в оригинальный
 	copy(ip, newIP)
-	
+
 	return true
 }
 
@@ -285,7 +297,7 @@ func anonymizeIPv6(ip net.IP) bool {
 func GetIPMappingStats() (privateIPv4, publicIPv4, ipv6 int) {
 	mapMutex.RLock()
 	defer mapMutex.RUnlock()
-	
+
 	return len(ipv4PrivateMap), len(ipv4PublicMap), len(ipv6Map)
 }
 
@@ -293,11 +305,11 @@ func GetIPMappingStats() (privateIPv4, publicIPv4, ipv6 int) {
 func GetSampleIPMappings(count int) (privateMap, publicMap, ipv6Maps map[string]string) {
 	mapMutex.RLock()
 	defer mapMutex.RUnlock()
-	
+
 	privateMap = make(map[string]string)
 	publicMap = make(map[string]string)
 	ipv6Maps = make(map[string]string)
-	
+
 	// Получаем примеры приватных IPv4
 	i := 0
 	for original, anonymized := range ipv4PrivateMap {
@@ -307,7 +319,7 @@ func GetSampleIPMappings(count int) (privateMap, publicMap, ipv6Maps map[string]
 		privateMap[original] = anonymized.String()
 		i++
 	}
-	
+
 	// Получаем примеры публичных IPv4
 	i = 0
 	for original, anonymized := range ipv4PublicMap {
@@ -317,7 +329,7 @@ func GetSampleIPMappings(count int) (privateMap, publicMap, ipv6Maps map[string]
 		publicMap[original] = anonymized.String()
 		i++
 	}
-	
+
 	// Получаем примеры IPv6
 	i = 0
 	for original, anonymized := range ipv6Map {
@@ -327,6 +339,6 @@ func GetSampleIPMappings(count int) (privateMap, publicMap, ipv6Maps map[string]
 		ipv6Maps[original] = anonymized.String()
 		i++
 	}
-	
+
 	return privateMap, publicMap, ipv6Maps
 }
