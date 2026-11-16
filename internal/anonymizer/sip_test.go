@@ -63,14 +63,64 @@ func TestSIPIdentifiersAndStatistics(t *testing.T) {
 }
 
 func TestSIPDetection(t *testing.T) {
-	for _, method := range []string{"INVITE", "ACK", "BYE", "CANCEL", "OPTIONS", "REGISTER", "REFER", "NOTIFY", "SUBSCRIBE", "MESSAGE", "INFO", "SIP/2.0"} {
-		if !isSIPPacket([]byte(method + " something")) {
+	for _, method := range []string{"INVITE", "ACK", "BYE", "CANCEL", "OPTIONS", "REGISTER", "REFER", "NOTIFY", "SUBSCRIBE", "MESSAGE", "INFO", "UPDATE", "PRACK", "PUBLISH", "X-CUSTOM", "INVITEX"} {
+		if !isSIPPacket([]byte(method + " sip:alice@example.test SIP/2.0\r\n\r\n")) {
 			t.Errorf("not detected: %s", method)
 		}
 	}
-	for _, payload := range []string{"", "abc", "GET / HTTP/1.1", "random payload"} {
+	for _, line := range []string{
+		"SIP/2.0 100 Trying", "SIP/2.0 200 OK", "SIP/2.0 486 Busy Here", "SIP/2.0 200 ",
+		"sip/2.0 200 OK", "OPTIONS sips:alice@[2001:4860::1]:5061 SIP/2.0",
+		"OPTIONS tel:+12025550123 SIP/2.0", "X.TEST!%*_+`'~ sip:service@example.test SIP/2.0",
+	} {
+		if !isSIPPacket([]byte(line + "\r\n")) {
+			t.Errorf("valid start line rejected: %q", line)
+		}
+	}
+	for _, payload := range []string{
+		"", "abc", "GET / HTTP/1.1\r\n", "random payload",
+		"INVITE something\r\n", "INVITEX not a SIP request\r\n", "SIP/2.0garbage\r\n",
+		"SIP/2.0 20 OK\r\n", "SIP/2.0 2000 OK\r\n", "SIP/2.0 xyz OK\r\n", "SIP/2.0 200\r\n",
+		"INVITE sip:alice@example.test HTTP/1.1\r\n", "INVITE sip:alice@example.test SIP/2.00\r\n",
+		"INVITE sip:alice@example.test SIP/2.0 extra\r\n", "INVITE /relative SIP/2.0\r\n",
+		"INVITE sip: SIP/2.0\r\n", "INVITE  sip:alice@example.test SIP/2.0\r\n",
+		"BAD/METHOD sip:alice@example.test SIP/2.0\r\n", "INVITE\tsip:alice@example.test SIP/2.0\r\n",
+		"INVITE sip:alice@example.test SIP/2.0", "SIP/2.0 200 OK\n",
+		"junk\r\nINVITE sip:alice@example.test SIP/2.0\r\n",
+	} {
 		if isSIPPacket([]byte(payload)) {
-			t.Errorf("false detection: %s", payload)
+			t.Errorf("false detection: %q", payload)
+		}
+	}
+}
+
+func TestExtendedSIPMethodsAreAnonymized(t *testing.T) {
+	const phone = "+12025550789"
+	const ipv4 = "10.76.54.32"
+	const ipv6 = "2001:4860:abcd::7"
+	for _, method := range []string{"UPDATE", "PRACK", "PUBLISH", "X-CUSTOM"} {
+		for _, protocol := range []string{"udp", "tcp"} {
+			t.Run(method+"/"+protocol, func(t *testing.T) {
+				payload := []byte(method + " sip:" + phone + "@" + ipv4 + " SIP/2.0\r\nContact: <sip:alice@[" + ipv6 + "]>\r\nContent-Length: 0\r\n\r\n")
+				p := testPacket(t, false, protocol, payload)
+				if !ProcessSIPPacket(p) {
+					t.Fatal("SIP request was skipped")
+				}
+				data := GetModifiedPacketData(p)
+				if len(data) == 0 {
+					t.Fatal("missing modified packet")
+				}
+				offset := len(p.Data()) - len(p.TransportLayer().LayerPayload())
+				result := string(data[offset:])
+				for _, original := range []string{phone, ipv4, ipv6} {
+					if strings.Contains(result, original) {
+						t.Errorf("original identity remains: %s", original)
+					}
+				}
+				if !strings.HasPrefix(result, method+" ") {
+					t.Fatal("method changed")
+				}
+			})
 		}
 	}
 }

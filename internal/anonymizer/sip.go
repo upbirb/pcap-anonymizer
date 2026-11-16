@@ -3,6 +3,7 @@ package anonymizer
 import (
 	"bytes"
 	"fmt"
+	"net/url"
 	"regexp"
 	"strings"
 
@@ -147,35 +148,55 @@ func GetModifiedPacketData(packet gopacket.Packet) []byte {
 	return data
 }
 
-// isSIPPacket определяет, является ли пакет SIP-пакетом
+// isSIPPacket recognizes a complete SIP/2.0 request/status line (RFC 3261,
+// sections 7 and 25.1). Extension methods use the same token syntax as standard
+// methods, so recognition must not depend on an enumerated method list.
+// This identifies messages; it does not validate all headers or assemble TCP.
 func isSIPPacket(payload []byte) bool {
-	if len(payload) < 4 {
+	end := bytes.Index(payload, []byte("\r\n"))
+	if end < 0 {
 		return false
 	}
-
-	// Проверяем начало пакета на соответствие SIP-сообщению
-	startsWith := func(prefix string) bool {
-		return len(payload) >= len(prefix) &&
-			bytes.Equal(bytes.ToUpper(payload[:len(prefix)]), bytes.ToUpper([]byte(prefix)))
+	line := string(payload[:end])
+	if strings.ContainsAny(line, "\r\n") {
+		return false
 	}
-
-	// Проверяем на SIP-запросы и ответы
-	if startsWith("SIP/2.0") ||
-		startsWith("INVITE") ||
-		startsWith("ACK") ||
-		startsWith("BYE") ||
-		startsWith("CANCEL") ||
-		startsWith("OPTIONS") ||
-		startsWith("REGISTER") ||
-		startsWith("REFER") ||
-		startsWith("NOTIFY") ||
-		startsWith("SUBSCRIBE") ||
-		startsWith("MESSAGE") ||
-		startsWith("INFO") {
-		return true
+	first, rest, ok := strings.Cut(line, " ")
+	if !ok {
+		return false
 	}
+	second, third, ok := strings.Cut(rest, " ")
+	if !ok {
+		return false
+	}
+	if strings.EqualFold(first, "SIP/2.0") {
+		// Reason-Phrase may contain spaces or be empty. The status is exactly
+		// three digits, including extension codes described by the SIP grammar.
+		return len(second) == 3 && second[0] >= '0' && second[0] <= '9' &&
+			second[1] >= '0' && second[1] <= '9' && second[2] >= '0' && second[2] <= '9'
+	}
+	if !isSIPMethodToken(first) || !strings.EqualFold(third, "SIP/2.0") {
+		return false
+	}
+	// Request-URI is absolute: SIP/SIPS and other schemes such as tel are valid.
+	target, err := url.ParseRequestURI(second)
+	return err == nil && target.IsAbs() && (target.Opaque != "" || target.Host != "" || target.Path != "")
+}
 
-	return false
+func isSIPMethodToken(method string) bool {
+	if method == "" {
+		return false
+	}
+	for i := 0; i < len(method); i++ {
+		c := method[i]
+		if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' {
+			continue
+		}
+		if !strings.ContainsRune("-.!%*_+`'~", rune(c)) {
+			return false
+		}
+	}
+	return true
 }
 
 // anonymizeSIPContent анонимизирует телефонные номера и IP-адреса в SIP-сообщении

@@ -198,6 +198,12 @@ Example Phone Number mappings:
 
 ## SIP Anonymization Details
 
+SIP messages are recognized by a complete request/status line as described in
+[RFC 3261](https://www.rfc-editor.org/rfc/rfc3261.html#section-7), rather than by a
+fixed list of method prefixes. This includes `UPDATE`, `PRACK`, `PUBLISH` and
+extension methods with valid SIP token syntax. The start line must end in CRLF;
+incomplete TCP start lines require stream reassembly, which is not implemented.
+
 The tool anonymizes the following elements in SIP (Session Initiation Protocol) packets:
 
 - Telephone numbers in SIP URIs (e.g., `sip:+79261234567@domain.com`)
