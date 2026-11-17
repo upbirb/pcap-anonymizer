@@ -37,10 +37,11 @@ func writeReport(out io.Writer, stats processingStats, duration time.Duration, s
 	- IPv4 in content:    %d found and anonymized
 	- IPv6 in content:    %d found and anonymized
 	- User IDs:           %d found and anonymized
+	- URI domains:        %d unique domains
 	- Serialization errors: %d
 	`, stats.total, stats.modified, stats.ipv4Modified, stats.ipv6Modified,
 		duration, privateCount, publicCount, ipv6Count,
-		sipDetected, sipModified, sipPhones, sipIPv4, sipIPv6, userIDs, sipErrors)
+		sipDetected, sipModified, sipPhones, sipIPv4, sipIPv6, userIDs, anonymizer.GetSIPDomainMappingStats(), sipErrors)
 
 	if showMappings {
 		// Получаем примеры анонимизированных данных
@@ -73,6 +74,10 @@ func writeReport(out io.Writer, stats processingStats, duration time.Duration, s
 		// Выводим примеры анонимизированных идентификаторов пользователей
 		fmt.Fprintln(&text, "\nExample User ID mappings:")
 		for original, anonymized := range userIDMap {
+			fmt.Fprintf(&text, "  %s -> %s\n", original, anonymized)
+		}
+		fmt.Fprintln(&text, "\nExample URI Domain mappings:")
+		for original, anonymized := range anonymizer.GetSampleSIPDomainMappings(5) {
 			fmt.Fprintf(&text, "  %s -> %s\n", original, anonymized)
 		}
 	}

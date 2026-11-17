@@ -47,7 +47,7 @@ func TestSIPDiagnosticReasons(t *testing.T) {
 		{"empty", func(t *testing.T) gopacket.Packet { return testPacket(t, false, "udp", nil) }, "SIP: skipped (empty payload)"},
 		{"not SIP", func(t *testing.T) gopacket.Packet { return testPacket(t, false, "udp", []byte("not SIP")) }, "SIP: skipped (payload not recognized as SIP)"},
 		{"unchanged", func(t *testing.T) gopacket.Packet {
-			return testPacket(t, false, "udp", []byte("OPTIONS sip:service@example.test SIP/2.0\r\n\r\n"))
+			return testPacket(t, false, "udp", []byte("OPTIONS sip:service@192.0.2.1 SIP/2.0\r\n\r\n"))
 		}, "SIP: content unchanged"},
 	}
 	for _, tt := range cases {

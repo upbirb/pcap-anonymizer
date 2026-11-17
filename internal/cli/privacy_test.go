@@ -16,7 +16,8 @@ func TestOutputDoesNotExposePacketIdentities(t *testing.T) {
 	defer log.SetOutput(previous)
 	const phone = "+12025550987"
 	const userID = "userabcdef98"
-	payload := []byte("OPTIONS sip:" + phone + "@10.11.12.13 SIP/2.0\r\nX-Subscriber-ID: " + userID + "\r\nContent-Length: 0\r\n\r\n")
+	const domain = "pbx.customer.example"
+	payload := []byte("OPTIONS sip:" + phone + "@" + domain + " SIP/2.0\r\nX-Subscriber-ID: " + userID + "\r\nContent-Length: 0\r\n\r\n")
 	for _, mode := range []string{"default", "--no-sip", "--sip-only", "-v"} {
 		t.Run(mode, func(t *testing.T) {
 			dir := t.TempDir()
@@ -32,7 +33,7 @@ func TestOutputDoesNotExposePacketIdentities(t *testing.T) {
 				t.Fatal(err)
 			}
 			all := stdout.String() + stderr.String() + libraryLogs.String()
-			for _, original := range []string{phone, userID, "10.11.12.13", "8.8.8.8", "2001:4860:abcd::1", "2001:4860:abcd::2"} {
+			for _, original := range []string{phone, userID, domain, "10.11.12.13", "8.8.8.8", "2001:4860:abcd::1", "2001:4860:abcd::2"} {
 				if strings.Contains(all, original) {
 					t.Errorf("output exposes original identity %q", original)
 				}
@@ -79,17 +80,18 @@ func TestExplicitMappingReport(t *testing.T) {
 	input, output := filepath.Join(dir, "input.pcap"), filepath.Join(dir, "output.pcap")
 	const phone = "+12025550987"
 	const userID = "userabcdef98"
-	cliFixtureWithPayload(t, input, []byte("OPTIONS sip:"+phone+"@10.11.12.13 SIP/2.0\r\nX-Subscriber-ID: "+userID+"\r\nContent-Length: 0\r\n\r\n"))
+	const domain = "pbx.customer.example"
+	cliFixtureWithPayload(t, input, []byte("OPTIONS sip:"+phone+"@"+domain+" SIP/2.0\r\nX-Subscriber-ID: "+userID+"\r\nContent-Length: 0\r\n\r\n"))
 	var stdout, stderr bytes.Buffer
 	if err := Run([]string{input, output, "--show-mappings"}, &stdout, &stderr); err != nil {
 		t.Fatal(err)
 	}
-	for _, value := range []string{"Example IPv4 Private mappings:", "Example IPv4 Public mappings:", "Example IPv6 mappings:", "Example Phone Number mappings:", "Example User ID mappings:", "  " + phone + " -> ", "  " + userID + " -> "} {
+	for _, value := range []string{"Example IPv4 Private mappings:", "Example IPv4 Public mappings:", "Example IPv6 mappings:", "Example Phone Number mappings:", "Example User ID mappings:", "  " + phone + " -> ", "  " + userID + " -> ", "Example URI Domain mappings:", "  " + domain + " -> "} {
 		if !strings.Contains(stdout.String(), value) {
 			t.Errorf("explicit report is missing %q", value)
 		}
 	}
-	if strings.Contains(stderr.String(), phone) || strings.Contains(stderr.String(), userID) {
+	if strings.Contains(stderr.String(), phone) || strings.Contains(stderr.String(), userID) || strings.Contains(stderr.String(), domain) {
 		t.Error("mapping identities leaked to diagnostics")
 	}
 }

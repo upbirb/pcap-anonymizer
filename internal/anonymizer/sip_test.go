@@ -27,7 +27,7 @@ func TestSIPDisplayAndURIPhoneConsistency(t *testing.T) {
 	input := "From: \"" + number + "\" <sip:" + number + "@example.test>\r\n"
 	got, count, _, _ := anonymizeSIPContent([]byte(input))
 	replacement := getAnonymizedPhoneNumber(number)
-	want := strings.ReplaceAll(input, number, replacement)
+	want := strings.ReplaceAll(strings.ReplaceAll(input, number, replacement), "example.test", anonymizeSIPDomain("example.test"))
 	if string(got) != want || count != 2 {
 		t.Fatalf("got %q count %d, want %q count 2", got, count, want)
 	}
@@ -212,5 +212,48 @@ func TestAddressClassificationAndStats(t *testing.T) {
 		if len(a) > n || len(b) > n || len(c) > n {
 			t.Fatal("sample count exceeded")
 		}
+	}
+}
+
+func TestPhoneNumbersUseEachOccurrenceBoundaries(t *testing.T) {
+	const number = "12025550199"
+	const signed = "+12025550199"
+	replacement := getAnonymizedPhoneNumber(number)
+	signedReplacement := getAnonymizedPhoneNumber(signed)
+	cases := []struct {
+		name, input, want string
+		count             int
+	}{
+		{"embedded first", "abc" + number + " " + number, "abc" + number + " " + replacement, 1},
+		{"standalone first", number + " abc" + number, replacement + " abc" + number, 1},
+		{"embedded suffix first", number + "abc " + number, number + "abc " + replacement, 1},
+		{"embedded suffix last", number + " " + number + "abc", replacement + " " + number + "abc", 1},
+		{"mixed occurrences", "abc" + number + ", " + number + "; " + number + "xyz / " + number, "abc" + number + ", " + replacement + "; " + number + "xyz / " + replacement, 2},
+		{"standalone repeats", number + ", " + number, replacement + ", " + replacement, 2},
+		{"signed embedded first", "abc" + signed + " " + signed, "abc" + signed + " " + signedReplacement, 1},
+		{"signed standalone first", signed + " abc" + signed, signedReplacement + " abc" + signed, 1},
+		{"both forms", number + " " + signed, replacement + " " + signedReplacement, 2},
+		{"long digit sequences", "12345678901234567890", "12345678901234567890", 0},
+		{"short number", "5060", "5060", 0},
+		{"no numbers", "example.test", "example.test", 0},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			count := 3 // The helper adds to its caller's counter.
+			got := anonymizePhoneNumbers(tt.input, &count)
+			if got != tt.want || count != 3+tt.count {
+				t.Fatalf("got %q count %d; want %q count %d", got, count, tt.want, 3+tt.count)
+			}
+		})
+	}
+}
+
+func TestSIPRepeatedPhoneInExtensionHeader(t *testing.T) {
+	const number = "12025550199"
+	input := "OPTIONS sip:service@example.test SIP/2.0\r\nX-Account-Info: abc" + number + " " + number + " " + number + "xyz\r\n\r\n"
+	want := "OPTIONS sip:service@" + anonymizeSIPDomain("example.test") + " SIP/2.0\r\nX-Account-Info: abc" + number + " " + getAnonymizedPhoneNumber(number) + " " + number + "xyz\r\n\r\n"
+	got, count, _, _ := anonymizeSIPContent([]byte(input))
+	if string(got) != want || count != 1 {
+		t.Fatalf("got %q count %d; want %q count 1", got, count, want)
 	}
 }

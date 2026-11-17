@@ -14,6 +14,7 @@ import (
 // Глобальные переменные и счетчики
 var (
 	// Регулярные выражения для поиска
+	sipPlainPhoneRegex  = regexp.MustCompile(`\+?[0-9]{7,15}`)
 	sipPhoneRegex       = regexp.MustCompile(`(?i)(sip:)(\+?[0-9]{5,15})(@[^>\s;]+)`)
 	sipDisplayNameRegex = regexp.MustCompile(`(?i)("?)(\+?[0-9]{5,15})("?\s*<sip:)(\+?[0-9]{5,15})(@)`)
 	// Определяем регулярное выражение для X-заголовков
@@ -365,49 +366,30 @@ func GetSampleSIPPhoneMappings(count int) map[string]string {
 	return phoneMap
 }
 
-// anonymizePhoneNumbers анонимизирует все телефонные номера в тексте
+// anonymizePhoneNumbers replaces standalone phone numbers in extension headers.
+// Boundaries are checked at each match's original byte offsets: an identical
+// number may be part of an identifier at one position and standalone elsewhere.
 func anonymizePhoneNumbers(text string, count *int) string {
-	// Для телефонных номеров без контекста (просто числа длиной 7-15 цифр)
-	// Используем простое регулярное выражение, совместимое с Go
-	phonePattern := regexp.MustCompile(`(\+?[0-9]{7,15})`)
-
-	return phonePattern.ReplaceAllStringFunc(text, func(match string) string {
-		// Проверяем, что это телефонный номер, а не часть другого текста
-		// Проверяем символы до и после телефонного номера
-		index := strings.Index(text, match)
-		if index > 0 {
-			prevChar := text[index-1]
-			// Если предыдущий символ - буква или цифра, считаем это частью другого слова
-			if (prevChar >= 'a' && prevChar <= 'z') ||
-				(prevChar >= 'A' && prevChar <= 'Z') ||
-				(prevChar >= '0' && prevChar <= '9') {
-				return match
-			}
+	isAlphanumeric := func(c byte) bool {
+		return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9'
+	}
+	var result strings.Builder
+	last := 0
+	for _, span := range sipPlainPhoneRegex.FindAllStringIndex(text, -1) {
+		start, end := span[0], span[1]
+		if start > 0 && isAlphanumeric(text[start-1]) || end < len(text) && isAlphanumeric(text[end]) {
+			continue
 		}
-
-		// Проверяем символ после телефонного номера
-		afterIndex := index + len(match)
-		if afterIndex < len(text) {
-			nextChar := text[afterIndex]
-			// Если следующий символ - буква или цифра, считаем это частью другого слова
-			if (nextChar >= 'a' && nextChar <= 'z') ||
-				(nextChar >= 'A' && nextChar <= 'Z') ||
-				(nextChar >= '0' && nextChar <= '9') {
-				return match
-			}
-		}
-
-		// Игнорируем очевидно не телефонные числа (например, порты, timestamp и т.д.)
-		if len(match) < 7 || strings.Contains(match, ".") {
-			return match
-		}
-
-		// Анонимизируем телефонный номер
-		anonPhone := getAnonymizedPhoneNumber(match)
-		*count++
-
-		return anonPhone
-	})
+		result.WriteString(text[last:start])
+		result.WriteString(getAnonymizedPhoneNumber(text[start:end]))
+		last = end
+		(*count)++
+	}
+	if last == 0 {
+		return text
+	}
+	result.WriteString(text[last:])
+	return result.String()
 }
 
 // anonymizeUserIDs анонимизирует идентификаторы пользователей и другие чувствительные данные

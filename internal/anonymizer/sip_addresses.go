@@ -38,6 +38,14 @@ func anonymizeSIPAddresses(content string) (string, int, int) {
 		return ip.String()
 	}
 	host := func(value string) string { return replaceSIPHost(value, address) }
+	uriHost := func(value string) string {
+		return replaceSIPHost(value, func(literal string) string {
+			if _, err := netip.ParseAddr(literal); err == nil {
+				return address(literal)
+			}
+			return anonymizeSIPDomain(literal)
+		})
+	}
 	lines := strings.SplitAfter(content, "\n")
 	inBody := false
 	for i, line := range lines {
@@ -50,7 +58,7 @@ func anonymizeSIPAddresses(content string) (string, int, int) {
 			continue
 		}
 		// URIs may occur in the request line, standard headers and extension headers.
-		line = replaceSIPURIs(line, host)
+		line = replaceSIPURIs(line, uriHost)
 		colon := strings.IndexByte(line, ':')
 		if colon < 0 {
 			lines[i] = line
@@ -115,6 +123,9 @@ func replaceSIPHost(value string, address func(string) string) string {
 	endpoint, suffix := value[:end], value[end:]
 	if strings.HasPrefix(endpoint, "[") {
 		if close := strings.IndexByte(endpoint, ']'); close >= 0 {
+			if _, err := netip.ParseAddr(endpoint[1:close]); err != nil {
+				return value
+			}
 			return "[" + address(endpoint[1:close]) + "]" + endpoint[close+1:] + suffix
 		}
 		return value
@@ -126,7 +137,7 @@ func replaceSIPHost(value string, address func(string) string) string {
 	if h, p, err := net.SplitHostPort(endpoint); err == nil {
 		return address(h) + ":" + p + suffix
 	}
-	return value
+	return address(endpoint) + suffix
 }
 
 func replaceSIPURIs(text string, host func(string) string) string {
@@ -148,11 +159,14 @@ func replaceSIPURIs(text string, host func(string) string) string {
 		begin := start + scheme
 		end := begin
 		for end < len(text) && !strings.ContainsRune(" \t\r\n<>\"", rune(text[end])) {
+			if text[end] == ',' && (strings.HasPrefix(lower[end-offset+1:], "sip:") || strings.HasPrefix(lower[end-offset+1:], "sips:")) {
+				break
+			}
 			end++
 		}
 		authority := text[begin:end]
 		hostStart := 0
-		if at := strings.LastIndexByte(authority, '@'); at >= 0 {
+		if at := strings.IndexByte(authority, '@'); at >= 0 {
 			hostStart = at + 1
 		}
 		out.WriteString(text[offset : begin+hostStart])

@@ -44,7 +44,6 @@ func TestSIPAndSDPAddressFields(t *testing.T) {
 
 func TestSIPAddressesPreserveNonAddressValues(t *testing.T) {
 	for _, input := range []string{
-		"Contact: <sip:alice@host.example:5060>\r\n",
 		"Contact: <sip:alice@[2001:db8::1234]:5060>\r\n",
 		"Contact: <sip:alice@[2001:4860::xyz]:5060>\r\n",
 		"Contact: <sip:alice@999.10.20.30:5060>\r\n",

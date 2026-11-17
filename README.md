@@ -5,7 +5,7 @@ PCAP Anonymizer is a command-line tool for anonymizing IPv4/IPv6 addresses and s
 ## Features
 
 - Anonymization of IPv4 and IPv6 addresses at the network layer
-- Anonymization of telephone numbers and IP addresses in SIP (Session Initiation Protocol) packets
+- Anonymization of telephone numbers, IP addresses and URI domains in SIP packets
 - Support for PCAP and PCAPNG formats
 - Support for GZIP compressed files
 - Consistent address replacement (the same address is always replaced with the same anonymized address)
@@ -21,6 +21,7 @@ PCAP Anonymizer is a command-line tool for anonymizing IPv4/IPv6 addresses and s
 - IPv6 addresses are replaced with addresses from the **2001:db8::/32** network
 - Phone numbers in SIP messages are replaced with numbers starting with **555**
 - IP addresses inside SIP message contents are anonymized using the same mapping as at the network layer
+- SIP/SIPS URI domains are consistently replaced with names such as `domain-1.invalid`
 
 ## Installation
 
@@ -107,7 +108,9 @@ pcap-anonymizer/
 │   │   ├── sip.go                 # SIP packet processing, phone numbers and user IDs
 │   │   ├── sip_test.go            # SIP detection, identifiers, statistics and configuration
 │   │   ├── sip_addresses.go       # Field-based SIP/SDP address parsing and replacement
-│   │   └── sip_addresses_test.go  # SIP/SDP address field and mapping tests
+│   │   ├── sip_addresses_test.go  # SIP/SDP address field and mapping tests
+│   │   ├── sip_domains.go         # URI hostname validation and domain mappings
+│   │   └── sip_domains_test.go    # URI domain consistency, scope and output tests
 │   └── pcap/
 │       ├── pcap_test.go           # Capture formats, round trips and error handling
 │       ├── reader.go              # PCAP/PCAPNG reading with GZIP input support
@@ -213,6 +216,16 @@ The tool anonymizes the following elements in SIP (Session Initiation Protocol) 
 - Call-ID host suffixes, including compact `i` headers
 - Address lists in `X-Forwarded-For` and `X-Real-IP`
 - SDP origin (`o=`), connection (`c=`), RTCP and ICE candidate addresses
+
+Domain replacement applies to the host component of explicit `sip:`/`sips:`
+URIs in the request line and headers, including host-only URIs. ASCII DNS names
+and IDNA names in punycode form are supported. Case differences and a final DNS
+root dot use the same mapping; the final dot is retained. Ports, URI parameters
+and query values are preserved. Domains in plain text, SDP, Via sent-by values
+and Call-ID suffixes are not changed by this URI rule. Domain mappings are shown
+only with `--show-mappings`; default and verbose diagnostics contain no source
+domains. The `.invalid` suffix is reserved by
+[RFC 2606](https://www.rfc-editor.org/rfc/rfc2606.html#section-2).
 
 Address boundaries come from the field syntax; Go's `net/netip` parser validates
 the complete literal. SIP/SDP uses the same address mapping functions as packet
